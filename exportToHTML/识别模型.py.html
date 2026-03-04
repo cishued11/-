@@ -1,0 +1,211 @@
+<html>
+<head>
+<title>识别模型.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #2aacb8;}
+.s5 { color: #6aab73;}
+.s6 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+识别模型.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -*-</span>
+<span class="s2">import </span><span class="s1">torch</span>
+<span class="s2">import </span><span class="s1">torch</span><span class="s3">.</span><span class="s1">nn </span><span class="s2">as </span><span class="s1">nn</span>
+<span class="s2">import </span><span class="s1">torch</span><span class="s3">.</span><span class="s1">optim </span><span class="s2">as </span><span class="s1">optim</span>
+<span class="s2">from </span><span class="s1">torch</span><span class="s3">.</span><span class="s1">utils</span><span class="s3">.</span><span class="s1">data </span><span class="s2">import </span><span class="s1">DataLoader</span>
+<span class="s2">from </span><span class="s1">torchvision </span><span class="s2">import </span><span class="s1">transforms</span><span class="s3">, </span><span class="s1">models</span>
+<span class="s2">from </span><span class="s1">torch</span><span class="s3">.</span><span class="s1">optim</span><span class="s3">.</span><span class="s1">lr_scheduler </span><span class="s2">import </span><span class="s1">StepLR</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">json</span>
+
+
+<span class="s0"># ===================== 1. 定义ResNet18模型（无预训练权重，避免下载错误） =====================</span>
+<span class="s2">class </span><span class="s1">AnimalModel</span><span class="s3">(</span><span class="s1">nn</span><span class="s3">.</span><span class="s1">Module</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">num_classes</span><span class="s3">=</span><span class="s4">90</span><span class="s3">, </span><span class="s1">device</span><span class="s3">=</span><span class="s5">&quot;cuda&quot; </span><span class="s2">if </span><span class="s1">torch</span><span class="s3">.</span><span class="s1">cuda</span><span class="s3">.</span><span class="s1">is_available</span><span class="s3">() </span><span class="s2">else </span><span class="s5">&quot;cpu&quot;</span><span class="s3">):</span>
+        <span class="s1">super</span><span class="s3">(</span><span class="s1">AnimalModel</span><span class="s3">, </span><span class="s1">self</span><span class="s3">).</span><span class="s1">__init__</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">num_classes </span><span class="s3">= </span><span class="s1">num_classes</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">device </span><span class="s3">= </span><span class="s1">device</span>
+
+        <span class="s0"># 核心修改：不用预训练权重（weights=None），避免下载/哈希错误</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">backbone </span><span class="s3">= </span><span class="s1">models</span><span class="s3">.</span><span class="s1">resnet18</span><span class="s3">(</span><span class="s1">weights</span><span class="s3">=</span><span class="s2">None</span><span class="s3">)</span>
+        <span class="s0"># 适配90类动物，修改最后一层</span>
+        <span class="s1">in_features </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">backbone</span><span class="s3">.</span><span class="s1">fc</span><span class="s3">.</span><span class="s1">in_features</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">backbone</span><span class="s3">.</span><span class="s1">fc </span><span class="s3">= </span><span class="s1">nn</span><span class="s3">.</span><span class="s1">Sequential</span><span class="s3">(</span>
+            <span class="s1">nn</span><span class="s3">.</span><span class="s1">Dropout</span><span class="s3">(</span><span class="s1">p</span><span class="s3">=</span><span class="s4">0.2</span><span class="s3">),</span>
+            <span class="s1">nn</span><span class="s3">.</span><span class="s1">Linear</span><span class="s3">(</span><span class="s1">in_features</span><span class="s3">, </span><span class="s4">512</span><span class="s3">),</span>
+            <span class="s1">nn</span><span class="s3">.</span><span class="s1">ReLU</span><span class="s3">(</span><span class="s1">inplace</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+            <span class="s1">nn</span><span class="s3">.</span><span class="s1">Linear</span><span class="s3">(</span><span class="s4">512</span><span class="s3">, </span><span class="s1">num_classes</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s0"># 不冻结层（从头训练，适配无预训练的情况）</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">to</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">device</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">forward</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">x</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">backbone</span><span class="s3">(</span><span class="s1">x</span><span class="s3">)</span>
+
+
+<span class="s0"># ===================== 2. 数据集加载 =====================</span>
+<span class="s2">from </span><span class="s1">torch</span><span class="s3">.</span><span class="s1">utils</span><span class="s3">.</span><span class="s1">data </span><span class="s2">import </span><span class="s1">Dataset</span>
+<span class="s2">from </span><span class="s1">PIL </span><span class="s2">import </span><span class="s1">Image</span>
+
+
+<span class="s2">class </span><span class="s1">AnimalDS</span><span class="s3">(</span><span class="s1">Dataset</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">transform</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">transform </span><span class="s3">= </span><span class="s1">transform</span>
+        <span class="s0"># 标注文件路径</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">label_path </span><span class="s3">= </span><span class="s5">r&quot;D:\PythonProject4\动物识别\animal_labels.json&quot;</span>
+        <span class="s2">if not </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">exists</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">label_path</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">FileNotFoundError</span><span class="s3">(</span><span class="s5">f&quot;标注文件不存在：</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">label_path</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+        <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">label_path</span><span class="s3">, </span><span class="s5">&quot;r&quot;</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s5">&quot;utf-8&quot;</span><span class="s3">) </span><span class="s2">as </span><span class="s1">f</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">img_labels </span><span class="s3">= </span><span class="s1">json</span><span class="s3">.</span><span class="s1">load</span><span class="s3">(</span><span class="s1">f</span><span class="s3">)</span>
+
+        <span class="s0"># 生成动物映射</span>
+        <span class="s1">animal_names </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">set</span><span class="s3">([</span><span class="s1">info</span><span class="s3">[</span><span class="s5">&quot;label&quot;</span><span class="s3">] </span><span class="s2">for </span><span class="s1">info </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">img_labels</span><span class="s3">.</span><span class="s1">values</span><span class="s3">()]))</span>
+        <span class="s1">animal_names</span><span class="s3">.</span><span class="s1">sort</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">animal_map </span><span class="s3">= {</span><span class="s1">name</span><span class="s3">: </span><span class="s1">idx </span><span class="s2">for </span><span class="s1">idx</span><span class="s3">, </span><span class="s1">name </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">animal_names</span><span class="s3">)}</span>
+        <span class="s0"># 过滤有效图片</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">valid_data </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_filter_valid</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_filter_valid</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s6">&quot;&quot;&quot;过滤不存在/损坏的图片&quot;&quot;&quot;</span>
+        <span class="s1">valid </span><span class="s3">= []</span>
+        <span class="s2">for </span><span class="s1">info </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">img_labels</span><span class="s3">.</span><span class="s1">values</span><span class="s3">():</span>
+            <span class="s1">img_path </span><span class="s3">= </span><span class="s1">info</span><span class="s3">[</span><span class="s5">&quot;path&quot;</span><span class="s3">]</span>
+            <span class="s2">if </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">exists</span><span class="s3">(</span><span class="s1">img_path</span><span class="s3">) </span><span class="s2">and </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">isfile</span><span class="s3">(</span><span class="s1">img_path</span><span class="s3">):</span>
+                <span class="s2">try</span><span class="s3">:</span>
+                    <span class="s1">Image</span><span class="s3">.</span><span class="s1">open</span><span class="s3">(</span><span class="s1">img_path</span><span class="s3">).</span><span class="s1">convert</span><span class="s3">(</span><span class="s5">&quot;RGB&quot;</span><span class="s3">)</span>
+                    <span class="s1">valid</span><span class="s3">.</span><span class="s1">append</span><span class="s3">({</span><span class="s5">&quot;path&quot;</span><span class="s3">: </span><span class="s1">img_path</span><span class="s3">, </span><span class="s5">&quot;label&quot;</span><span class="s3">: </span><span class="s1">info</span><span class="s3">[</span><span class="s5">&quot;label&quot;</span><span class="s3">]})</span>
+                <span class="s2">except</span><span class="s3">:</span>
+                    <span class="s2">continue</span>
+        <span class="s2">return </span><span class="s1">valid</span>
+
+    <span class="s2">def </span><span class="s1">__len__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">valid_data</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__getitem__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">idx</span><span class="s3">):</span>
+        <span class="s1">data </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">valid_data</span><span class="s3">[</span><span class="s1">idx</span><span class="s3">]</span>
+        <span class="s1">img_path </span><span class="s3">= </span><span class="s1">data</span><span class="s3">[</span><span class="s5">&quot;path&quot;</span><span class="s3">]</span>
+        <span class="s1">label_str </span><span class="s3">= </span><span class="s1">data</span><span class="s3">[</span><span class="s5">&quot;label&quot;</span><span class="s3">]</span>
+
+        <span class="s0"># 读取图片</span>
+        <span class="s1">img </span><span class="s3">= </span><span class="s1">Image</span><span class="s3">.</span><span class="s1">open</span><span class="s3">(</span><span class="s1">img_path</span><span class="s3">).</span><span class="s1">convert</span><span class="s3">(</span><span class="s5">&quot;RGB&quot;</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">transform</span><span class="s3">:</span>
+            <span class="s1">img </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">transform</span><span class="s3">(</span><span class="s1">img</span><span class="s3">)</span>
+
+        <span class="s0"># 标签转数字</span>
+        <span class="s1">label </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">animal_map</span><span class="s3">[</span><span class="s1">label_str</span><span class="s3">]</span>
+        <span class="s2">return </span><span class="s1">img</span><span class="s3">, </span><span class="s1">label</span>
+
+
+<span class="s0"># ===================== 3. 训练配置（适配CPU+无预训练） =====================</span>
+<span class="s0"># 超参数（无预训练需调高学习率，增加轮数）</span>
+<span class="s1">EPOCH </span><span class="s3">= </span><span class="s4">20  </span><span class="s0"># CPU训练20轮足够</span>
+<span class="s1">BATCH_SIZE </span><span class="s3">= </span><span class="s4">16  </span><span class="s0"># CPU专属批次大小</span>
+<span class="s1">LEARNING_RATE </span><span class="s3">= </span><span class="s4">0.001  </span><span class="s0"># 无预训练需调高学习率（原0.0005→0.001）</span>
+<span class="s1">DEVICE </span><span class="s3">= </span><span class="s1">torch</span><span class="s3">.</span><span class="s1">device</span><span class="s3">(</span><span class="s5">&quot;cuda&quot; </span><span class="s2">if </span><span class="s1">torch</span><span class="s3">.</span><span class="s1">cuda</span><span class="s3">.</span><span class="s1">is_available</span><span class="s3">() </span><span class="s2">else </span><span class="s5">&quot;cpu&quot;</span><span class="s3">)</span>
+<span class="s1">print</span><span class="s3">(</span><span class="s5">f&quot;训练设备：</span><span class="s2">{</span><span class="s1">DEVICE</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+<span class="s1">print</span><span class="s3">(</span><span class="s5">f&quot;⚠️ 无预训练权重，训练轮数20轮，学习率0.001&quot;</span><span class="s3">)</span>
+
+<span class="s0"># 数据预处理（增强保留，提升特征学习）</span>
+<span class="s1">train_transform </span><span class="s3">= </span><span class="s1">transforms</span><span class="s3">.</span><span class="s1">Compose</span><span class="s3">([</span>
+    <span class="s1">transforms</span><span class="s3">.</span><span class="s1">Resize</span><span class="s3">([</span><span class="s4">100</span><span class="s3">, </span><span class="s4">100</span><span class="s3">], </span><span class="s1">antialias</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+    <span class="s1">transforms</span><span class="s3">.</span><span class="s1">RandomHorizontalFlip</span><span class="s3">(</span><span class="s1">p</span><span class="s3">=</span><span class="s4">0.5</span><span class="s3">),</span>
+    <span class="s1">transforms</span><span class="s3">.</span><span class="s1">RandomRotation</span><span class="s3">(</span><span class="s4">15</span><span class="s3">),</span>
+    <span class="s1">transforms</span><span class="s3">.</span><span class="s1">ColorJitter</span><span class="s3">(</span><span class="s1">brightness</span><span class="s3">=</span><span class="s4">0.2</span><span class="s3">, </span><span class="s1">contrast</span><span class="s3">=</span><span class="s4">0.2</span><span class="s3">),</span>
+    <span class="s1">transforms</span><span class="s3">.</span><span class="s1">ToTensor</span><span class="s3">(),</span>
+    <span class="s1">transforms</span><span class="s3">.</span><span class="s1">Normalize</span><span class="s3">(</span><span class="s1">mean</span><span class="s3">=[</span><span class="s4">0.485</span><span class="s3">, </span><span class="s4">0.456</span><span class="s3">, </span><span class="s4">0.406</span><span class="s3">], </span><span class="s1">std</span><span class="s3">=[</span><span class="s4">0.229</span><span class="s3">, </span><span class="s4">0.224</span><span class="s3">, </span><span class="s4">0.225</span><span class="s3">])</span>
+<span class="s3">])</span>
+
+<span class="s0"># 加载数据集（CPU专属配置）</span>
+<span class="s1">dataset </span><span class="s3">= </span><span class="s1">AnimalDS</span><span class="s3">(</span><span class="s1">transform</span><span class="s3">=</span><span class="s1">train_transform</span><span class="s3">)</span>
+<span class="s1">train_loader </span><span class="s3">= </span><span class="s1">DataLoader</span><span class="s3">(</span>
+    <span class="s1">dataset</span><span class="s3">,</span>
+    <span class="s1">batch_size</span><span class="s3">=</span><span class="s1">BATCH_SIZE</span><span class="s3">,</span>
+    <span class="s1">shuffle</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">num_workers</span><span class="s3">=</span><span class="s4">0</span><span class="s3">,  </span><span class="s0"># CPU必须设0</span>
+    <span class="s1">pin_memory</span><span class="s3">=</span><span class="s2">False</span>
+<span class="s3">)</span>
+<span class="s1">print</span><span class="s3">(</span><span class="s5">f&quot;✅ 数据集加载完成：</span><span class="s2">{</span><span class="s1">len</span><span class="s3">(</span><span class="s1">dataset</span><span class="s3">)</span><span class="s2">} </span><span class="s5">条数据，</span><span class="s2">{</span><span class="s1">len</span><span class="s3">(</span><span class="s1">dataset</span><span class="s3">.</span><span class="s1">animal_map</span><span class="s3">)</span><span class="s2">} </span><span class="s5">类动物&quot;</span><span class="s3">)</span>
+
+<span class="s0"># 初始化模型</span>
+<span class="s1">num_classes </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">dataset</span><span class="s3">.</span><span class="s1">animal_map</span><span class="s3">)</span>
+<span class="s1">model </span><span class="s3">= </span><span class="s1">AnimalModel</span><span class="s3">(</span><span class="s1">num_classes</span><span class="s3">=</span><span class="s1">num_classes</span><span class="s3">, </span><span class="s1">device</span><span class="s3">=</span><span class="s1">DEVICE</span><span class="s3">)</span>
+
+<span class="s0"># 优化器（AdamW，适配无预训练）</span>
+<span class="s1">optimizer </span><span class="s3">= </span><span class="s1">optim</span><span class="s3">.</span><span class="s1">AdamW</span><span class="s3">(</span>
+    <span class="s1">model</span><span class="s3">.</span><span class="s1">parameters</span><span class="s3">(),</span>
+    <span class="s1">lr</span><span class="s3">=</span><span class="s1">LEARNING_RATE</span><span class="s3">,</span>
+    <span class="s1">weight_decay</span><span class="s3">=</span><span class="s4">1e-4</span>
+<span class="s3">)</span>
+
+<span class="s0"># 损失函数</span>
+<span class="s1">criterion </span><span class="s3">= </span><span class="s1">nn</span><span class="s3">.</span><span class="s1">CrossEntropyLoss</span><span class="s3">()</span>
+
+<span class="s0"># 学习率调度器</span>
+<span class="s1">scheduler </span><span class="s3">= </span><span class="s1">StepLR</span><span class="s3">(</span><span class="s1">optimizer</span><span class="s3">, </span><span class="s1">step_size</span><span class="s3">=</span><span class="s4">8</span><span class="s3">, </span><span class="s1">gamma</span><span class="s3">=</span><span class="s4">0.5</span><span class="s3">)  </span><span class="s0"># 每8轮学习率减半</span>
+
+<span class="s0"># ===================== 4. 训练循环 =====================</span>
+<span class="s1">print</span><span class="s3">(</span><span class="s5">&quot;🚀 开始训练（无预训练权重，CPU训练约2~3小时）...&quot;</span><span class="s3">)</span>
+<span class="s1">best_loss </span><span class="s3">= </span><span class="s1">float</span><span class="s3">(</span><span class="s5">'inf'</span><span class="s3">)</span>
+<span class="s2">for </span><span class="s1">epoch </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">EPOCH</span><span class="s3">):</span>
+    <span class="s1">model</span><span class="s3">.</span><span class="s1">train</span><span class="s3">()</span>
+    <span class="s1">total_loss </span><span class="s3">= </span><span class="s4">0.0</span>
+    <span class="s2">for </span><span class="s1">batch_idx</span><span class="s3">, (</span><span class="s1">imgs</span><span class="s3">, </span><span class="s1">labels</span><span class="s3">) </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">train_loader</span><span class="s3">):</span>
+        <span class="s1">imgs</span><span class="s3">, </span><span class="s1">labels </span><span class="s3">= </span><span class="s1">imgs</span><span class="s3">.</span><span class="s1">to</span><span class="s3">(</span><span class="s1">DEVICE</span><span class="s3">), </span><span class="s1">labels</span><span class="s3">.</span><span class="s1">to</span><span class="s3">(</span><span class="s1">DEVICE</span><span class="s3">)</span>
+
+        <span class="s0"># 前向传播</span>
+        <span class="s1">outputs </span><span class="s3">= </span><span class="s1">model</span><span class="s3">(</span><span class="s1">imgs</span><span class="s3">)</span>
+        <span class="s1">loss </span><span class="s3">= </span><span class="s1">criterion</span><span class="s3">(</span><span class="s1">outputs</span><span class="s3">, </span><span class="s1">labels</span><span class="s3">)</span>
+
+        <span class="s0"># 反向传播</span>
+        <span class="s1">optimizer</span><span class="s3">.</span><span class="s1">zero_grad</span><span class="s3">()</span>
+        <span class="s1">loss</span><span class="s3">.</span><span class="s1">backward</span><span class="s3">()</span>
+        <span class="s1">optimizer</span><span class="s3">.</span><span class="s1">step</span><span class="s3">()</span>
+
+        <span class="s1">total_loss </span><span class="s3">+= </span><span class="s1">loss</span><span class="s3">.</span><span class="s1">item</span><span class="s3">()</span>
+
+        <span class="s0"># 打印进度</span>
+        <span class="s2">if </span><span class="s1">batch_idx </span><span class="s3">% </span><span class="s4">10 </span><span class="s3">== </span><span class="s4">0</span><span class="s3">:</span>
+            <span class="s1">avg_loss </span><span class="s3">= </span><span class="s1">total_loss </span><span class="s3">/ (</span><span class="s1">batch_idx </span><span class="s3">+ </span><span class="s4">1</span><span class="s3">)</span>
+            <span class="s1">print</span><span class="s3">(</span><span class="s5">f&quot;Epoch [</span><span class="s2">{</span><span class="s1">epoch </span><span class="s3">+ </span><span class="s4">1</span><span class="s2">}</span><span class="s5">/</span><span class="s2">{</span><span class="s1">EPOCH</span><span class="s2">}</span><span class="s5">] | Batch [</span><span class="s2">{</span><span class="s1">batch_idx </span><span class="s3">+ </span><span class="s4">1</span><span class="s2">}</span><span class="s5">/</span><span class="s2">{</span><span class="s1">len</span><span class="s3">(</span><span class="s1">train_loader</span><span class="s3">)</span><span class="s2">}</span><span class="s5">] | Loss: </span><span class="s2">{</span><span class="s1">avg_loss</span><span class="s2">:</span><span class="s5">.4f</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+    <span class="s0"># 更新学习率</span>
+    <span class="s1">scheduler</span><span class="s3">.</span><span class="s1">step</span><span class="s3">()</span>
+    <span class="s1">epoch_avg_loss </span><span class="s3">= </span><span class="s1">total_loss </span><span class="s3">/ </span><span class="s1">len</span><span class="s3">(</span><span class="s1">train_loader</span><span class="s3">)</span>
+    <span class="s1">print</span><span class="s3">(</span><span class="s5">f&quot;📌 Epoch </span><span class="s2">{</span><span class="s1">epoch </span><span class="s3">+ </span><span class="s4">1</span><span class="s2">} </span><span class="s5">平均损失：</span><span class="s2">{</span><span class="s1">epoch_avg_loss</span><span class="s2">:</span><span class="s5">.4f</span><span class="s2">} </span><span class="s5">| 当前学习率：</span><span class="s2">{</span><span class="s1">scheduler</span><span class="s3">.</span><span class="s1">get_last_lr</span><span class="s3">()[</span><span class="s4">0</span><span class="s3">]</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+    <span class="s0"># 保存最优模型</span>
+    <span class="s2">if </span><span class="s1">epoch_avg_loss </span><span class="s3">&lt; </span><span class="s1">best_loss</span><span class="s3">:</span>
+        <span class="s1">best_loss </span><span class="s3">= </span><span class="s1">epoch_avg_loss</span>
+        <span class="s1">torch</span><span class="s3">.</span><span class="s1">save</span><span class="s3">({</span>
+            <span class="s5">&quot;model_state_dict&quot;</span><span class="s3">: </span><span class="s1">model</span><span class="s3">.</span><span class="s1">state_dict</span><span class="s3">(),</span>
+            <span class="s5">&quot;num_classes&quot;</span><span class="s3">: </span><span class="s1">num_classes</span><span class="s3">,</span>
+            <span class="s5">&quot;animal_map&quot;</span><span class="s3">: </span><span class="s1">dataset</span><span class="s3">.</span><span class="s1">animal_map</span><span class="s3">,</span>
+            <span class="s5">&quot;epoch&quot;</span><span class="s3">: </span><span class="s1">epoch </span><span class="s3">+ </span><span class="s4">1</span><span class="s3">,</span>
+            <span class="s5">&quot;best_loss&quot;</span><span class="s3">: </span><span class="s1">best_loss</span>
+        <span class="s3">}, </span><span class="s5">&quot;AnimalModel_Best.pt&quot;</span><span class="s3">)</span>
+        <span class="s1">print</span><span class="s3">(</span><span class="s5">f&quot;✅ 保存最优模型（损失：</span><span class="s2">{</span><span class="s1">best_loss</span><span class="s2">:</span><span class="s5">.4f</span><span class="s2">}</span><span class="s5">）&quot;</span><span class="s3">)</span>
+
+<span class="s0"># 保存最终模型</span>
+<span class="s1">torch</span><span class="s3">.</span><span class="s1">save</span><span class="s3">({</span>
+    <span class="s5">&quot;model_state_dict&quot;</span><span class="s3">: </span><span class="s1">model</span><span class="s3">.</span><span class="s1">state_dict</span><span class="s3">(),</span>
+    <span class="s5">&quot;num_classes&quot;</span><span class="s3">: </span><span class="s1">num_classes</span><span class="s3">,</span>
+    <span class="s5">&quot;animal_map&quot;</span><span class="s3">: </span><span class="s1">dataset</span><span class="s3">.</span><span class="s1">animal_map</span><span class="s3">,</span>
+    <span class="s5">&quot;final_loss&quot;</span><span class="s3">: </span><span class="s1">epoch_avg_loss</span>
+<span class="s3">}, </span><span class="s5">&quot;AnimalModel_Final.pt&quot;</span><span class="s3">)</span>
+
+<span class="s1">print</span><span class="s3">(</span><span class="s5">&quot;</span><span class="s2">\n</span><span class="s5">🎉 训练完成！&quot;</span><span class="s3">)</span>
+<span class="s1">print</span><span class="s3">(</span><span class="s5">f&quot;📁 最优模型：AnimalModel_Best.pt（损失：</span><span class="s2">{</span><span class="s1">best_loss</span><span class="s2">:</span><span class="s5">.4f</span><span class="s2">}</span><span class="s5">）&quot;</span><span class="s3">)</span>
+<span class="s1">print</span><span class="s3">(</span><span class="s5">f&quot;📁 最终模型：AnimalModel_Final.pt&quot;</span><span class="s3">)</span></pre>
+</body>
+</html>
